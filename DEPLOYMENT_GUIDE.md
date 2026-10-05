@@ -84,10 +84,10 @@ sed -i "s|flutter_bootstrap.js|flutter_bootstrap.js?v=$TIMESTAMP|g" index.html
 
 # 4. Upload
 tar -czf ../../deploy.tar.gz .
-scp ../../deploy.tar.gz root@178.128.59.20:/tmp/
+scp ../../deploy.tar.gz root@YOUR_SERVER_IP:/tmp/
 
 # 5. Extract di server
-ssh root@178.128.59.20 "
+ssh root@YOUR_SERVER_IP "
   cd /var/www/getai-web
   tar -xzf /tmp/deploy.tar.gz
   rm -rf /var/cache/nginx/*
@@ -133,7 +133,7 @@ document.querySelector('script[src*="flutter_bootstrap"]').src
 ### Check di server:
 
 ```bash
-ssh root@178.128.59.20 "
+ssh root@YOUR_SERVER_IP "
   # Check file timestamps
   ls -la /var/www/getai-web/flutter_bootstrap.js
   ls -la /var/www/getai-web/main.dart.js
@@ -183,7 +183,7 @@ Track setiap deploy:
 
 ```bash
 # Di server, check current version
-ssh root@178.128.59.20 "grep 'flutter_bootstrap.js?v=' /var/www/getai-web/index.html"
+ssh root@YOUR_SERVER_IP "grep 'flutter_bootstrap.js?v=' /var/www/getai-web/index.html"
 
 # Output: flutter_bootstrap.js?v=1784796296
 # Timestamp ini = version number
@@ -202,7 +202,7 @@ date -d @1784796296
 Kalau deploy baru bermasalah:
 
 ```bash
-ssh root@178.128.59.20 "
+ssh root@YOUR_SERVER_IP "
   cd /var/www/getai-web
   
   # Check available backups
@@ -236,11 +236,11 @@ ssh root@178.128.59.20 "
 bash deploy_web_safe.sh
 
 # Check status
-ssh root@178.128.59.20 "systemctl status nginx"
+ssh root@YOUR_SERVER_IP "systemctl status nginx"
 
 # Clear cache manual
-ssh root@178.128.59.20 "rm -rf /var/cache/nginx/* && systemctl reload nginx"
+ssh root@YOUR_SERVER_IP "rm -rf /var/cache/nginx/* && systemctl reload nginx"
 
 # View logs
-ssh root@178.128.59.20 "tail -f /var/log/nginx/error.log"
+ssh root@YOUR_SERVER_IP "tail -f /var/log/nginx/error.log"
 ```

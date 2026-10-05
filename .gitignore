@@ -71,3 +71,17 @@ backend/fix_grok.py
 backend/fix_grok_kimi.py
 backend/fix_grok_white.py
 backend/resize_logos.py
+
+# Production deploy/setup scripts & ops docs (contain live server details)
+deploy-docker.sh
+deploy_fix.sh
+deploy_fixes.py
+deploy_flutter_admin.sh
+deploy_to_new_server.py
+deploy_web_safe.sh
+setup.sh
+setup_https.py
+setup_server.py
+setup_server.sh
+check_server.sh
+DNS_SETUP_GUIDE.txt

@@ -449,8 +449,8 @@ ufw --force enable
 Run local:
 
 ```bash
-rtk curl -s -o /dev/null -w "%{http_code}\n" http://178.128.59.20:4001/api/health
-rtk curl -s -o /dev/null -w "%{http_code}\n" http://178.128.59.20:4000/api/health
+rtk curl -s -o /dev/null -w "%{http_code}\n" http://YOUR_SERVER_IP:4001/api/health
+rtk curl -s -o /dev/null -w "%{http_code}\n" http://YOUR_SERVER_IP:4000/api/health
 ```
 
 Expected: timeout/connection failure or non-200 through public IP. `https://askcore.dev/api/health` remains 200.

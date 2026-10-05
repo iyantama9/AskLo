@@ -77,7 +77,7 @@ Or deploy manually:
 ```bash
 scp d:/Project/GetAI/build/web/flutter_bootstrap.js \
     d:/Project/GetAI/build/web/flutter_service_worker.js \
-    root@178.128.59.20:/var/www/getai-web/
+    root@YOUR_SERVER_IP:/var/www/getai-web/
 ```
 
 ## Verification
