@@ -1,6 +1,6 @@
 const { pool } = require('../db');
 
-const PUBLIC_PREFIXES = ['generated/', 'browse/'];
+const PUBLIC_PREFIXES = ['generated/', 'browse/', 'avatars/'];
 
 function isPublicKey(key) {
   return PUBLIC_PREFIXES.some((prefix) => key.startsWith(prefix));

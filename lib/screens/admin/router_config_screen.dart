@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import '../../services/api_service.dart';
 import '../../services/admin_service.dart';
+import 'admin_dialog.dart';
+import 'admin_shell.dart';
 
 class RouterConfigScreen extends StatefulWidget {
   const RouterConfigScreen({super.key});
@@ -11,8 +13,8 @@ class RouterConfigScreen extends StatefulWidget {
 
 class _RouterConfigScreenState extends State<RouterConfigScreen> {
   List<dynamic> _configs = [];
-  bool _isLoading = true;
   bool _isSyncing = false;
+  bool _isTesting = false;
   String? _error;
   late AdminService _adminService;
 
@@ -24,22 +26,12 @@ class _RouterConfigScreenState extends State<RouterConfigScreen> {
   }
 
   Future<void> _loadConfigs() async {
-    setState(() {
-      _isLoading = true;
-      _error = null;
-    });
-
+    _error = null;
     try {
       final configs = await _adminService.getRouterConfigs();
-      setState(() {
-        _configs = configs;
-        _isLoading = false;
-      });
+      if (mounted) setState(() => _configs = configs);
     } catch (e) {
-      setState(() {
-        _error = e.toString();
-        _isLoading = false;
-      });
+      setState(() => _error = e.toString());
     }
   }
 
@@ -51,7 +43,7 @@ class _RouterConfigScreenState extends State<RouterConfigScreen> {
       final count = result['count'] ?? 0;
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('✅ Berhasil sync $count model dari router'),
+          content: Text('✅ Sync $count model dari router'),
           backgroundColor: Colors.green[700],
         ),
       );
@@ -69,114 +61,57 @@ class _RouterConfigScreenState extends State<RouterConfigScreen> {
   }
 
   Future<void> _testConnection(int id, String name) async {
-    showDialog(
-      context: context,
-      barrierDismissible: false,
-      builder: (context) => const AlertDialog(
-        content: Row(
-          children: [
-            CircularProgressIndicator(),
-            SizedBox(width: 16),
-            Text('Testing connection...'),
-          ],
-        ),
-      ),
-    );
-
+    setState(() => _isTesting = true);
     try {
       final result = await _adminService.testRouterConnection(id);
-      if (mounted) {
-        Navigator.pop(context);
-
-        final success = result['success'] == true;
-        final duration = result['duration_ms'];
-
-        showDialog(
-          context: context,
-          builder: (context) => AlertDialog(
-            title: Row(
-              children: [
-                Icon(
-                  success ? Icons.check_circle : Icons.error,
-                  color: success ? Colors.green : Colors.red,
-                ),
-                const SizedBox(width: 8),
-                Text(success ? 'Connection Successful' : 'Connection Failed'),
-              ],
-            ),
-            content: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text('Router: $name'),
-                if (duration != null) Text('Response time: ${duration}ms'),
-                if (result['message'] != null)
-                  Text('Message: ${result['message']}'),
-              ],
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text('Close'),
-              ),
-            ],
-          ),
-        );
-      }
+      if (!mounted) return;
+      final success = result['success'] == true;
+      final duration = result['duration_ms'];
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+              success
+                  ? '✅ $name connection ok (${duration}ms)'
+                  : '❌ $name connection gagal'),
+          backgroundColor: success
+              ? Colors.green[700]
+              : Theme.of(context).colorScheme.error,
+        ),
+      );
+      await _loadConfigs();
     } catch (e) {
-      if (mounted) {
-        Navigator.pop(context);
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Test failed: $e')),
-        );
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Test gagal: $e'),
+            backgroundColor: Theme.of(context).colorScheme.error),
+      );
+    } finally {
+      if (mounted) setState(() => _isTesting = false);
     }
   }
 
-  Future<void> _saveConfig({
-    Map<String, dynamic>? existing,
-    required String name,
-    required String baseUrl,
-    required String apiKey,
-    required int timeoutMs,
-    required int maxRetries,
-  }) async {
+  Future<void> _toggleActive(dynamic config) async {
+    final active = config['is_active'] == true;
     try {
-      if (existing != null) {
-        await _adminService.updateRouterConfig(existing['id'], {
-          'name': name,
-          'base_url': baseUrl,
-          'api_key': apiKey,
-          'timeout_ms': timeoutMs,
-          'max_retries': maxRetries,
-        });
-      } else {
-        await _adminService.createRouterConfig({
-          'name': name,
-          'base_url': baseUrl,
-          'api_key': apiKey,
-          'timeout_ms': timeoutMs,
-          'max_retries': maxRetries,
-        });
-      }
+      await _adminService.updateRouterConfig(config['id'], {
+        'is_active': !active,
+      });
+      await _loadConfigs();
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(existing != null
-                ? '✅ Router berhasil diupdate'
-                : '✅ Router berhasil ditambahkan'),
+            content: Text(active
+                ? 'Router dinonaktifkan'
+                : 'Router diaktifkan sebagai router aktif'),
             backgroundColor: Colors.green[700],
           ),
         );
       }
-      await _loadConfigs();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('❌ Gagal menyimpan: $e'),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
+          SnackBar(content: Text('Gagal: $e'),
+              backgroundColor: Theme.of(context).colorScheme.error),
         );
       }
     }
@@ -190,16 +125,13 @@ class _RouterConfigScreenState extends State<RouterConfigScreen> {
         content: Text('Yakin ingin menghapus router "$name"?'),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context, false),
-            child: const Text('Batal'),
-          ),
+              onPressed: () => Navigator.pop(context, false),
+              child: const Text('Batal')),
           FilledButton(
-            onPressed: () => Navigator.pop(context, true),
-            style: FilledButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.error,
-            ),
-            child: const Text('Hapus'),
-          ),
+              style: FilledButton.styleFrom(
+                  backgroundColor: Theme.of(context).colorScheme.error),
+              onPressed: () => Navigator.pop(context, true),
+              child: const Text('Hapus')),
         ],
       ),
     );
@@ -208,84 +140,242 @@ class _RouterConfigScreenState extends State<RouterConfigScreen> {
 
     try {
       await _adminService.deleteRouterConfig(id);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('✅ Router "$name" berhasil dihapus'),
-            backgroundColor: Colors.green[700],
-          ),
-        );
-      }
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('✅ Router "$name" dihapus'),
+          backgroundColor: Colors.green[700],
+        ),
+      );
       await _loadConfigs();
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('❌ Gagal menghapus: $e'),
-            backgroundColor: Theme.of(context).colorScheme.error,
-          ),
+          SnackBar(content: Text('Gagal hapus: $e'),
+              backgroundColor: Theme.of(context).colorScheme.error),
         );
       }
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+  void _showConfigDialog({Map<String, dynamic>? config}) {
+    final nameController = TextEditingController(text: config?['name'] ?? '');
+    final urlController =
+        TextEditingController(text: config?['base_url'] ?? '');
+    final keyController = TextEditingController(
+        text: config?['api_key'] != null ? config!['api_key'] : '');
+    final timeoutController =
+        TextEditingController(text: (config?['timeout_ms'] ?? 30000).toString());
+    final retriesController =
+        TextEditingController(text: (config?['max_retries'] ?? 3).toString());
 
-    return Scaffold(
-      appBar: AppBar(
-        title: const Text('Router Configuration'),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.refresh),
-            onPressed: _loadConfigs,
-            tooltip: 'Refresh',
-          ),
-          const SizedBox(width: 4),
-          FilledButton.tonalIcon(
-            onPressed: _isSyncing ? null : _syncModels,
-            icon: _isSyncing
-                ? const SizedBox(
-                    width: 16,
-                    height: 16,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                : const Icon(Icons.sync, size: 18),
-            label: Text(_isSyncing ? 'Syncing...' : 'Sync Models'),
-          ),
-          const SizedBox(width: 8),
-          FilledButton.icon(
-            onPressed: () => _showConfigDialog(),
-            icon: const Icon(Icons.add),
-            label: const Text('Add Router'),
-          ),
-          const SizedBox(width: 16),
-        ],
-      ),
-      body: _isLoading
-          ? const Center(child: CircularProgressIndicator())
-          : _error != null
-              ? Center(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
+    bool showKey = config == null;
+
+    showDialog(
+      context: context,
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (dialogCtx, setDialogState) {
+          final theme = Theme.of(dialogCtx);
+
+          void doSave() async {
+            final name = nameController.text.trim();
+            final baseUrl = urlController.text.trim();
+            final apiKey = keyController.text.trim();
+
+            if (name.isEmpty || baseUrl.isEmpty) {
+              ScaffoldMessenger.of(dialogCtx).showSnackBar(
+                const SnackBar(
+                    content: Text('⚠️ Name dan Base URL wajib diisi')),
+              );
+              return;
+            }
+
+            final updateBody = <String, dynamic>{
+              'name': name,
+              'base_url': baseUrl,
+              'timeout_ms': int.tryParse(timeoutController.text) ?? 30000,
+              'max_retries': int.tryParse(retriesController.text) ?? 3,
+            };
+            if (apiKey.isNotEmpty) {
+              updateBody['api_key'] = apiKey;
+            } else if (config == null) {
+              ScaffoldMessenger.of(dialogCtx).showSnackBar(
+                const SnackBar(content: Text('⚠️ API Key wajib diisi')),
+              );
+              return;
+            }
+
+            Navigator.pop(dialogCtx);
+            try {
+              if (config != null) {
+                await _adminService.updateRouterConfig(config['id'], updateBody);
+              } else {
+                await _adminService.createRouterConfig(updateBody);
+              }
+              await _loadConfigs();
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text(config == null
+                        ? '✅ Router ditambahkan'
+                        : '✅ Router diupdate'),
+                    backgroundColor: Colors.green[700],
+                  ),
+                );
+              }
+            } catch (e) {
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    content: Text('Gagal: $e'),
+                    backgroundColor: theme.colorScheme.error,
+                  ),
+                );
+              }
+            }
+          }
+
+          Widget formBody() => Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  darkField(
+                    controller: nameController,
+                    label: 'Name',
+                    icon: Icons.router,
+                    hint: 'mis. Iyan Router',
+                  ),
+                  const SizedBox(height: 12),
+                  darkField(
+                    controller: urlController,
+                    label: 'Base URL',
+                    icon: Icons.link,
+                    hint: 'https://routers.iyantama.tech',
+                  ),
+                  const SizedBox(height: 12),
+                  darkField(
+                    controller: keyController,
+                    label: 'API Key',
+                    icon: Icons.key,
+                    obscure: !showKey,
+                    hint: config != null
+                        ? 'Isi untuk ganti, kosongkan jika tetap'
+                        : null,
+                    suffix: IconButton(
+                      icon: Icon(showKey ? Icons.visibility : Icons.visibility_off,
+                          size: 18, color: AdminUi.muted),
+                      onPressed: () => setDialogState(() => showKey = !showKey),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
                     children: [
-                      Icon(Icons.error, size: 48, color: theme.colorScheme.error),
-                      const SizedBox(height: 16),
-                      Text('Error: $_error'),
-                      const SizedBox(height: 16),
-                      FilledButton(
-                        onPressed: _loadConfigs,
-                        child: const Text('Retry'),
+                      Expanded(
+                        child: darkField(
+                          controller: timeoutController,
+                          label: 'Timeout (ms)',
+                          icon: Icons.timer,
+                          keyboardType: TextInputType.number,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: darkField(
+                          controller: retriesController,
+                          label: 'Max Retries',
+                          icon: Icons.replay,
+                          keyboardType: TextInputType.number,
+                        ),
                       ),
                     ],
                   ),
-                )
-              : _buildConfigList(),
+                ],
+              );
+
+          return AdminModal(
+            title: config == null ? 'Tambah Router' : 'Edit Router',
+            subtitle: config == null
+                ? 'Konfigurasi endpoint LLM router'
+                : config['name']?.toString(),
+            child: SingleChildScrollView(child: formBody()),
+            actions: [
+              ...modalActions(
+                onCancel: () => Navigator.pop(dialogCtx),
+                onConfirm: doSave,
+                cancelLabel: 'Batal',
+                confirmLabel: config == null ? 'Simpan' : 'Simpan Perubahan',
+              ),
+            ],
+            width: 500,
+          );
+        },
+      ),
     );
   }
 
-  Widget _buildConfigList() {
+  Widget _buildHeaderActions() {
+    final isNarrow = MediaQuery.sizeOf(context).width < 640;
+    if (isNarrow) {
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          IconButton(icon: const Icon(Icons.refresh, size: 20), tooltip: 'Refresh', onPressed: _loadConfigs),
+          IconButton(icon: _isSyncing ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.sync, size: 20), tooltip: 'Sync Models', onPressed: _isSyncing ? null : _syncModels),
+          IconButton(icon: const Icon(Icons.add, size: 20), tooltip: 'Tambah Router', onPressed: () => _showConfigDialog()),
+        ],
+      );
+    }
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        IconButton(icon: const Icon(Icons.refresh, size: 20), tooltip: 'Refresh', onPressed: _loadConfigs),
+        const SizedBox(width: 6),
+        FilledButton.tonalIcon(
+          onPressed: _isSyncing ? null : _syncModels,
+          icon: _isSyncing ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.sync, size: 18),
+          label: Text(_isSyncing ? 'Syncing…' : 'Sync Models'),
+        ),
+        const SizedBox(width: 6),
+        FilledButton.icon(onPressed: () => _showConfigDialog(), icon: const Icon(Icons.add), label: const Text('Add Router')),
+      ],
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final textMuted = const Color(0xFF8B8CA0);
+    final surface = const Color(0xFF141520);
+    final border = const Color(0xFF262738);
+
+    return AdminShell(
+      section: 'router',
+      onSectionSelected: AdminSectionController.select,
+      title: 'Router',
+      subtitle: 'Kelola router LLM dan koneksi',
+      headerActions: _buildHeaderActions(),
+      body: _error != null
+          ? Center(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.error_outline,
+                      size: 48, color: theme.colorScheme.error),
+                  const SizedBox(height: 16),
+                  Text('Gagal memuat data: $_error',
+                      style: theme.textTheme.bodyMedium),
+                  const SizedBox(height: 16),
+                  FilledButton(
+                      onPressed: _loadConfigs,
+                      child: const Text('Coba Lagi')),
+                ],
+              ),
+            )
+          : _buildConfigList(surface, border, textMuted),
+    );
+  }
+
+  Widget _buildConfigList(
+      Color surface, Color border, Color textMuted) {
     final theme = Theme.of(context);
 
     if (_configs.isEmpty) {
@@ -293,13 +383,11 @@ class _RouterConfigScreenState extends State<RouterConfigScreen> {
         child: Column(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
-            Icon(Icons.router, size: 48, color: theme.colorScheme.outline),
+            Icon(Icons.router, size: 48, color: textMuted),
             const SizedBox(height: 16),
             Text(
-              'No router configurations found',
-              style: theme.textTheme.bodyLarge?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
+              'Belum ada router yang dikonfigurasi',
+              style: TextStyle(color: textMuted, fontSize: 15),
             ),
             const SizedBox(height: 16),
             FilledButton.icon(
@@ -312,117 +400,177 @@ class _RouterConfigScreenState extends State<RouterConfigScreen> {
       );
     }
 
-    return ListView.builder(
-      padding: const EdgeInsets.all(24),
-      itemCount: _configs.length,
-      itemBuilder: (context, index) {
-        final config = _configs[index];
-        return Card(
-          margin: const EdgeInsets.only(bottom: 16),
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final isNarrow = constraints.maxWidth < 700;
+        final pad = isNarrow ? 16.0 : 24.0;
+        return ListView.builder(
+          padding: EdgeInsets.all(pad),
+          itemCount: _configs.length,
+          itemBuilder: (context, index) {
+            final config = _configs[index];
+            final active = config['is_active'] == true;
+            final lastTest = config['last_test_status'];
+            final name = config['name']?.toString() ?? '';
+            final url = config['base_url']?.toString() ?? '';
+            final cfgId = config['id'];
+
+            if (isNarrow) {
+              return Container(
+                margin: const EdgeInsets.only(bottom: 14),
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: surface,
+                  border: Border.all(color: border),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              Text(
-                                config['name'],
-                                style: theme.textTheme.titleLarge?.copyWith(
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              if (config['is_active'] == true)
-                                Chip(
-                                  label: const Text('Active'),
-                                  backgroundColor: Colors.green.withValues(alpha: 0.2),
-                                  labelStyle: TextStyle(color: Colors.green[700]),
-                                )
-                              else
-                                Chip(
-                                  label: const Text('Inactive'),
-                                  backgroundColor: Colors.grey.withValues(alpha: 0.2),
-                                ),
+                              Text(name,
+                                  style: theme.textTheme.titleLarge
+                                      ?.copyWith(fontWeight: FontWeight.bold)),
+                              const SizedBox(height: 4),
+                              Text(url,
+                                  style: theme.textTheme.bodySmall?.copyWith(
+                                      fontFamily: 'monospace',
+                                      color: theme.colorScheme.onSurfaceVariant),
+                                  overflow: TextOverflow.ellipsis),
                             ],
                           ),
-                          const SizedBox(height: 8),
-                          Text(
-                            config['base_url'],
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              fontFamily: 'monospace',
-                              color: theme.colorScheme.onSurfaceVariant,
-                            ),
-                          ),
-                        ],
-                      ),
+                        ),
+                        Switch(
+                          value: active,
+                          onChanged: (_) => _toggleActive(config),
+                        ),
+                      ],
                     ),
+                    if (active) ...[
+                      const SizedBox(height: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: Colors.green.withValues(alpha: 0.2),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: const Text('AKTIF',
+                            style: TextStyle(
+                                color: Colors.green,
+                                fontSize: 11,
+                                fontWeight: FontWeight.w700)),
+                      ),
+                    ],
+                    const SizedBox(height: 12),
+                    Wrap(
+                      spacing: 10,
+                      runSpacing: 8,
+                      children: [
+                        _buildInfoChip('Timeout', '${config['timeout_ms'] ?? 30000}ms', Icons.timer),
+                        _buildInfoChip('Retries', '${config['max_retries'] ?? 3}', Icons.replay),
+                        if (lastTest != null) _buildStatusChip(lastTest),
+                      ],
+                    ),
+                    const SizedBox(height: 12),
                     Row(
                       children: [
                         OutlinedButton.icon(
-                          onPressed: () => _testConnection(
-                            config['id'],
-                            config['name'],
-                          ),
-                          icon: const Icon(Icons.play_arrow, size: 18),
+                          onPressed: _isTesting ? null : () => _testConnection(cfgId, name),
+                          icon: _isTesting ? const SizedBox(width: 14, height: 14, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.play_arrow, size: 16),
                           label: const Text('Test'),
                         ),
-                        const SizedBox(width: 8),
-                        IconButton(
-                          icon: const Icon(Icons.edit),
-                          onPressed: () => _showConfigDialog(config: config),
-                          tooltip: 'Edit',
-                        ),
-                        IconButton(
-                          icon: Icon(Icons.delete_outline,
-                              color: theme.colorScheme.error),
-                          onPressed: () =>
-                              _deleteConfig(config['id'], config['name']),
-                          tooltip: 'Delete',
-                        ),
+                        const Spacer(),
+                        IconButton(icon: const Icon(Icons.edit), tooltip: 'Edit', onPressed: () => _showConfigDialog(config: config)),
+                        IconButton(icon: Icon(Icons.delete_outline, color: theme.colorScheme.error), tooltip: 'Delete', onPressed: () => _deleteConfig(cfgId, name)),
                       ],
                     ),
                   ],
                 ),
-                const SizedBox(height: 16),
-                Divider(color: theme.colorScheme.outlineVariant),
-                const SizedBox(height: 16),
-                Row(
-                  children: [
-                    _buildInfoChip(
-                      'Timeout',
-                      '${config['timeout_ms'] ?? 30000}ms',
-                      Icons.timer,
-                    ),
-                    const SizedBox(width: 12),
-                    _buildInfoChip(
-                      'Max Retries',
-                      '${config['max_retries'] ?? 3}',
-                      Icons.replay,
-                    ),
-                    if (config['last_tested_at'] != null) ...[
-                      const SizedBox(width: 12),
-                      _buildInfoChip(
-                        'Last Test',
-                        _formatDate(config['last_tested_at']),
-                        Icons.history,
+              );
+            }
+
+            return Container(
+              margin: const EdgeInsets.only(bottom: 16),
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: surface,
+                border: Border.all(color: border),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Row(
+                              children: [
+                                Text(name,
+                                    style: theme.textTheme.titleLarge
+                                        ?.copyWith(fontWeight: FontWeight.bold)),
+                                const SizedBox(width: 12),
+                                if (active)
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 8, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: Colors.green.withValues(alpha: 0.2),
+                                      borderRadius: BorderRadius.circular(6),
+                                    ),
+                                    child: const Text('AKTIF',
+                                        style: TextStyle(
+                                            color: Colors.green,
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w700,
+                                            letterSpacing: 0.5)),
+                                  ),
+                              ],
+                            ),
+                            const SizedBox(height: 8),
+                            Text(url,
+                                style: theme.textTheme.bodyMedium?.copyWith(
+                                    fontFamily: 'monospace',
+                                    color: theme.colorScheme.onSurfaceVariant),
+                                overflow: TextOverflow.ellipsis),
+                          ],
+                        ),
                       ),
+                      OutlinedButton.icon(
+                        onPressed: _isTesting ? null : () => _testConnection(cfgId, name),
+                        icon: _isTesting ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.play_arrow, size: 18),
+                        label: const Text('Test'),
+                      ),
+                      const SizedBox(width: 8),
+                      IconButton(icon: const Icon(Icons.edit), tooltip: 'Edit', onPressed: () => _showConfigDialog(config: config)),
+                      IconButton(icon: Icon(Icons.delete_outline, color: theme.colorScheme.error), tooltip: 'Delete', onPressed: () => _deleteConfig(cfgId, name)),
+                      const SizedBox(width: 8),
+                      Switch(value: active, onChanged: (_) => _toggleActive(config)),
                     ],
-                    if (config['last_test_status'] != null) ...[
+                  ),
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      _buildInfoChip('Timeout', '${config['timeout_ms'] ?? 30000}ms', Icons.timer),
                       const SizedBox(width: 12),
-                      _buildStatusChip(config['last_test_status']),
+                      _buildInfoChip('Max Retries', '${config['max_retries'] ?? 3}', Icons.replay),
+                      if (lastTest != null) ...[
+                        const SizedBox(width: 12),
+                        _buildStatusChip(lastTest),
+                      ],
                     ],
-                  ],
-                ),
-              ],
-            ),
-          ),
+                  ),
+                ],
+              ),
+            );
+          },
         );
       },
     );
@@ -433,7 +581,8 @@ class _RouterConfigScreenState extends State<RouterConfigScreen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest,
+        color: const Color(0xFF0B0C14),
+        border: Border.all(color: const Color(0xFF262738)),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
@@ -443,9 +592,8 @@ class _RouterConfigScreenState extends State<RouterConfigScreen> {
           const SizedBox(width: 6),
           Text(
             '$label: $value',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
+            style: theme.textTheme.bodySmall
+                ?.copyWith(color: theme.colorScheme.onSurfaceVariant),
           ),
         ],
       ),
@@ -455,178 +603,38 @@ class _RouterConfigScreenState extends State<RouterConfigScreen> {
   Widget _buildStatusChip(String status) {
     Color color;
     String label;
-    Color textColor;
-
     switch (status) {
       case 'success':
         color = Colors.green;
-        textColor = Colors.green.shade700;
-        label = 'Success';
+        label = 'Last test: OK';
         break;
       case 'failed':
         color = Colors.orange;
-        textColor = Colors.orange.shade700;
-        label = 'Failed';
+        label = 'Last test: Gagal';
         break;
       case 'error':
         color = Colors.red;
-        textColor = Colors.red.shade700;
-        label = 'Error';
+        label = 'Last test: Error';
         break;
       default:
         color = Colors.grey;
-        textColor = Colors.grey.shade700;
-        label = status;
+        label = 'Last test: $status';
     }
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
       decoration: BoxDecoration(
-        color: color.withValues(alpha: 0.2),
+        color: color.withValues(alpha: 0.15),
         borderRadius: BorderRadius.circular(8),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(Icons.circle, size: 8, color: color),
+          Icon(Icons.circle, size: 10, color: color),
           const SizedBox(width: 6),
           Text(
             label,
-            style: TextStyle(
-              fontSize: 12,
-              color: textColor,
-              fontWeight: FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _formatDate(String? date) {
-    if (date == null) return 'Never';
-    try {
-      final dt = DateTime.parse(date);
-      final now = DateTime.now();
-      final diff = now.difference(dt);
-
-      if (diff.inMinutes < 60) return '${diff.inMinutes}m ago';
-      if (diff.inHours < 24) return '${diff.inHours}h ago';
-      return '${diff.inDays}d ago';
-    } catch (e) {
-      return 'Unknown';
-    }
-  }
-
-  void _showConfigDialog({Map<String, dynamic>? config}) {
-    final nameController = TextEditingController(text: config?['name'] ?? '');
-    final urlController = TextEditingController(text: config?['base_url'] ?? '');
-    final keyController = TextEditingController(
-      text: config != null && config['api_key'] != null
-          ? config['api_key']
-          : '',
-    );
-    final timeoutController = TextEditingController(
-      text: (config?['timeout_ms'] ?? 30000).toString(),
-    );
-    final retriesController = TextEditingController(
-      text: (config?['max_retries'] ?? 3).toString(),
-    );
-
-    showDialog(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: Text(config == null ? 'Add Router' : 'Edit Router'),
-        content: SizedBox(
-          width: 500,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameController,
-                decoration: const InputDecoration(
-                  labelText: 'Name',
-                  hintText: 'e.g. Iyan Router',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: urlController,
-                decoration: const InputDecoration(
-                  labelText: 'Base URL',
-                  hintText: 'https://routers.iyantama.tech',
-                  border: OutlineInputBorder(),
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: keyController,
-                decoration: const InputDecoration(
-                  labelText: 'API Key / Password',
-                  border: OutlineInputBorder(),
-                ),
-                obscureText: true,
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    child: TextField(
-                      controller: timeoutController,
-                      decoration: const InputDecoration(
-                        labelText: 'Timeout (ms)',
-                        border: OutlineInputBorder(),
-                      ),
-                      keyboardType: TextInputType.number,
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: TextField(
-                      controller: retriesController,
-                      decoration: const InputDecoration(
-                        labelText: 'Max Retries',
-                        border: OutlineInputBorder(),
-                      ),
-                      keyboardType: TextInputType.number,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancel'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              final name = nameController.text.trim();
-              final baseUrl = urlController.text.trim();
-              final apiKey = keyController.text.trim();
-
-              if (name.isEmpty || baseUrl.isEmpty || apiKey.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text('⚠️ Semua field wajib diisi')),
-                );
-                return;
-              }
-
-              Navigator.pop(dialogContext);
-
-              await _saveConfig(
-                existing: config,
-                name: name,
-                baseUrl: baseUrl,
-                apiKey: apiKey,
-                timeoutMs: int.tryParse(timeoutController.text) ?? 30000,
-                maxRetries: int.tryParse(retriesController.text) ?? 3,
-              );
-            },
-            child: Text(config == null ? 'Add' : 'Save'),
+            style: TextStyle(color: color, fontWeight: FontWeight.w500),
           ),
         ],
       ),

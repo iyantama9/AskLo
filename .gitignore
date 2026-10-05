@@ -41,14 +41,6 @@ backend/.env.production
 *.apk
 *.tar.gz
 *.zip
-deploy_*.sh
-deploy_*.py
-setup_*.sh
-setup_*.py
-check_server.sh
-minio-fix.tar.gz
-Dockerfile.frontend
-docker-compose*.yml
 docker-deployment.tar.gz
 
 # Temp scripts & screenshots
@@ -64,10 +56,18 @@ tmp_adacode/
 .DS_Store
 *.log
 .agent/
+.agnes/
 .gemini/
 .code-review-graph/
 .claude/
 .opencode.json
 .mcp.json
+.mcp.json.crg-bak
 devtools_options.yaml
 web/admin.html
+
+# One-off logo processing scripts (kept out of the repo)
+backend/fix_grok.py
+backend/fix_grok_kimi.py
+backend/fix_grok_white.py
+backend/resize_logos.py

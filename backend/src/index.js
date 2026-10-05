@@ -13,6 +13,7 @@ const browseRoutes = require('./routes/browse');
 const modelRoutes = require('./routes/models');
 const usageRoutes = require('./routes/usage');
 const feedbackRoutes = require('./routes/feedback');
+const profileRoutes = require('./routes/profile');
 const authMiddleware = require('./middleware/auth');
 
 // Admin routes
@@ -20,6 +21,8 @@ const adminModelsRoutes = require('./routes/admin/models');
 const adminRouterRoutes = require('./routes/admin/router');
 const adminPromotionsRoutes = require('./routes/admin/promotions');
 const adminUsersRoutes = require('./routes/admin/users');
+const adminSettingsRoutes = require('./routes/admin/settings');
+const adminProviderLogosRoutes = require('./routes/admin/providerLogos');
 
 const rateLimit = require('express-rate-limit');
 const logger = require('./utils/logger');
@@ -193,6 +196,7 @@ app.use('/api/browse', browseRoutes);
 app.use('/api/models', modelRoutes);
 app.use('/api/usage', usageRoutes);
 app.use('/api/feedback', feedbackRoutes);
+app.use('/api/profile', profileRoutes);
 app.use('/api', artifactRoutes);
 
 // Admin routes (protected by adminOnly middleware inside each route)
@@ -200,6 +204,8 @@ app.use('/api/admin/models', adminModelsRoutes);
 app.use('/api/admin/router', adminRouterRoutes);
 app.use('/api/admin/promotions', adminPromotionsRoutes);
 app.use('/api/admin/users', adminUsersRoutes);
+app.use('/api/admin/settings', adminSettingsRoutes);
+app.use('/api/admin/provider-logos', adminProviderLogosRoutes);
 
 app.use(notFoundHandler);
 app.use(errorHandler);

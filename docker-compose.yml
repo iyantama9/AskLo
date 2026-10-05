@@ -1,0 +1,138 @@
+name: getai
+
+services:
+  postgres:
+    image: postgres:15-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-getai}
+      POSTGRES_USER: ${POSTGRES_USER:-getai_user}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.docker}
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-55432}:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - app-network
+
+  minio:
+    image: minio/minio:latest
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env.docker}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env.docker}
+    ports:
+      - "127.0.0.1:${MINIO_API_PORT:-19000}:9000"
+      - "127.0.0.1:${MINIO_CONSOLE_PORT:-19001}:9001"
+    volumes:
+      - minio_data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - app-network
+
+  minio-init:
+    image: minio/minio:latest
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env.docker}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env.docker}
+      MINIO_BUCKET: ${MINIO_BUCKET:-asklo-files}
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: >-
+      /bin/sh -c '
+      mc alias set local http://minio:9000 "$$MINIO_ROOT_USER" "$$MINIO_ROOT_PASSWORD";
+      mc mb --ignore-existing "local/$$MINIO_BUCKET";
+      mc anonymous set download "local/$$MINIO_BUCKET";
+      echo "MinIO bucket ready: $$MINIO_BUCKET";
+      '
+    restart: "no"
+    networks:
+      - app-network
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 4001
+      DATABASE_URL: postgresql://${POSTGRES_USER:-getai_user}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env.docker}@postgres:5432/${POSTGRES_DB:-getai}
+      DATABASE_SSL: "false"
+      RUN_MIGRATIONS_ON_START: "true"
+      MINIO_ENDPOINT: minio:9000
+      MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:?Set MINIO_ROOT_USER in .env.docker}
+      MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:?Set MINIO_ROOT_PASSWORD in .env.docker}
+      MINIO_BUCKET: ${MINIO_BUCKET:-asklo-files}
+      MINIO_USE_SSL: "false"
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8888}
+      JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env.docker}
+      SESSION_SECRET: ${SESSION_SECRET:?Set SESSION_SECRET in .env.docker}
+      AI_BASE_URL: ${AI_BASE_URL:-https://routers.iyantama.tech/v1}
+      AI_API_KEY: ${AI_API_KEY:?Set AI_API_KEY in .env.docker}
+      QUOTA_AI_REQUESTS_PER_DAY: ${QUOTA_AI_REQUESTS_PER_DAY:-100}
+      QUOTA_BROWSE_REQUESTS_PER_DAY: ${QUOTA_BROWSE_REQUESTS_PER_DAY:-30}
+      QUOTA_IMAGE_GENERATIONS_PER_DAY: ${QUOTA_IMAGE_GENERATIONS_PER_DAY:-20}
+      QUOTA_UPLOADS_PER_DAY: ${QUOTA_UPLOADS_PER_DAY:-50}
+      QUOTA_UPLOAD_BYTES_PER_DAY: ${QUOTA_UPLOAD_BYTES_PER_DAY:-20971520}
+    ports:
+      - "127.0.0.1:${BACKEND_PORT:-14001}:4001"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:4001/api/health/ready').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
+    networks:
+      - app-network
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    ports:
+      - "127.0.0.1:${APP_PORT:-8888}:80"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1/ || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    networks:
+      - app-network
+
+volumes:
+  postgres_data:
+    name: ${POSTGRES_VOLUME_NAME:-getai_docker_postgres_data}
+  minio_data:
+    name: ${MINIO_VOLUME_NAME:-getai_docker_minio_data}
+
+networks:
+  app-network:
+    driver: bridge
+

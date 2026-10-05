@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 class AppTheme {
   AppTheme._();
 
-  // AskCore Purple Palette
+  // AskLo Purple Palette
   static const Color _primaryPurple = Color(0xFF7C3AED);
   static const Color _deepViolet = Color(0xFF5B21B6);
   static const Color _lightPurple = Color(0xFFA78BFA);

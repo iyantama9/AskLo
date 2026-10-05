@@ -40,8 +40,9 @@ class AdminService {
 
   Future<Map<String, dynamic>> updateModel(
       String id, Map<String, dynamic> updates) async {
+    final encodedId = Uri.encodeComponent(id);
     final response = await http.put(
-      Uri.parse('${AppConstants.backendUrl}/api/admin/models/$id'),
+      Uri.parse('${AppConstants.backendUrl}/api/admin/models/$encodedId'),
       headers: _headers,
       body: jsonEncode(updates),
     );
@@ -53,8 +54,9 @@ class AdminService {
   }
 
   Future<void> deleteModel(String id) async {
+    final encodedId = Uri.encodeComponent(id);
     final response = await http.delete(
-      Uri.parse('${AppConstants.backendUrl}/api/admin/models/$id'),
+      Uri.parse('${AppConstants.backendUrl}/api/admin/models/$encodedId'),
       headers: _headers,
     );
     if (response.statusCode != 200) {
@@ -62,9 +64,22 @@ class AdminService {
     }
   }
 
+  /// Persist the main-page model order. [orderedIds] is the full sequence.
+  Future<void> reorderModels(List<String> orderedIds) async {
+    final response = await http.post(
+      Uri.parse('${AppConstants.backendUrl}/api/admin/models/reorder'),
+      headers: _headers,
+      body: jsonEncode({'ordered_ids': orderedIds}),
+    );
+    if (response.statusCode != 200) {
+      throw Exception('Failed to reorder models: ${response.body}');
+    }
+  }
+
   Future<Map<String, dynamic>> toggleModel(String id) async {
+    final encodedId = Uri.encodeComponent(id);
     final response = await http.patch(
-      Uri.parse('${AppConstants.backendUrl}/api/admin/models/$id/toggle'),
+      Uri.parse('${AppConstants.backendUrl}/api/admin/models/$encodedId/toggle'),
       headers: _headers,
     );
     if (response.statusCode == 200) {
@@ -72,6 +87,43 @@ class AdminService {
       return data['model'];
     }
     throw Exception('Failed to toggle model: ${response.body}');
+  }
+
+  // Provider logos
+  Future<List<dynamic>> getProviderLogos() async {
+    final response = await http.get(
+      Uri.parse('${AppConstants.backendUrl}/api/admin/provider-logos'),
+      headers: _headers,
+    );
+    if (response.statusCode == 200) {
+      final data = jsonDecode(response.body);
+      return data['logos'] as List<dynamic>;
+    }
+    throw Exception('Failed to load provider logos: ${response.body}');
+  }
+
+  Future<Map<String, dynamic>> uploadProviderLogo(
+      String provider, String base64Image) async {
+    final response = await http.post(
+      Uri.parse('${AppConstants.backendUrl}/api/admin/provider-logos'),
+      headers: _headers,
+      body: jsonEncode({'provider': provider, 'image': base64Image}),
+    );
+    if (response.statusCode == 201) {
+      return jsonDecode(response.body);
+    }
+    throw Exception('Failed to upload provider logo: ${response.body}');
+  }
+
+  Future<void> deleteProviderLogo(String provider) async {
+    final encoded = Uri.encodeComponent(provider);
+    final response = await http.delete(
+      Uri.parse('${AppConstants.backendUrl}/api/admin/provider-logos/$encoded'),
+      headers: _headers,
+    );
+    if (response.statusCode != 200) {
+      throw Exception('Failed to delete provider logo: ${response.body}');
+    }
   }
 
   // Router Configuration
@@ -210,6 +262,42 @@ class AdminService {
     }
   }
 
+  // Sync models from router (writes DB overrides, invalidates catalog cache)
+  Future<Map<String, dynamic>> syncModels() async {
+    final response = await http.post(
+      Uri.parse('${AppConstants.backendUrl}/api/admin/models/sync'),
+      headers: _headers,
+    );
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    }
+    throw Exception('Failed to sync models: ${response.body}');
+  }
+
+  // Settings
+  Future<Map<String, dynamic>> getSettings() async {
+    final response = await http.get(
+      Uri.parse('${AppConstants.backendUrl}/api/admin/settings'),
+      headers: _headers,
+    );
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    }
+    throw Exception('Failed to load settings: ${response.body}');
+  }
+
+  Future<Map<String, dynamic>> updateSetting(String key, dynamic value) async {
+    final response = await http.put(
+      Uri.parse('${AppConstants.backendUrl}/api/admin/settings/$key'),
+      headers: _headers,
+      body: jsonEncode({'value': value}),
+    );
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    }
+    throw Exception('Failed to update setting: ${response.body}');
+  }
+
   // Users
   Future<Map<String, dynamic>> getUsers({
     int page = 1,
@@ -244,6 +332,18 @@ class AdminService {
       return jsonDecode(response.body);
     }
     throw Exception('Failed to load user: ${response.body}');
+  }
+
+  Future<Map<String, dynamic>> changeUserRole(int userId, String role) async {
+    final response = await http.patch(
+      Uri.parse('${AppConstants.backendUrl}/api/admin/users/$userId/role'),
+      headers: _headers,
+      body: jsonEncode({'role': role}),
+    );
+    if (response.statusCode == 200) {
+      return jsonDecode(response.body);
+    }
+    throw Exception('Failed to change role: ${response.body}');
   }
 
   Future<Map<String, dynamic>> getUserStats() async {

@@ -10,6 +10,8 @@ class ChatSidebar extends StatefulWidget {
   final ValueChanged<int> onDeleteChat;
   final VoidCallback onLogout;
   final String username;
+  final String? avatarUrl;
+  final VoidCallback? onEditProfile;
 
   const ChatSidebar({
     super.key,
@@ -21,6 +23,8 @@ class ChatSidebar extends StatefulWidget {
     required this.onDeleteChat,
     required this.onLogout,
     required this.username,
+    this.avatarUrl,
+    this.onEditProfile,
   });
 
   @override
@@ -333,17 +337,54 @@ class _ChatSidebarState extends State<ChatSidebar> {
               ),
               child: Row(
                 children: [
-                  CircleAvatar(
-                    radius: 16,
-                    backgroundColor: theme.colorScheme.primary,
-                    child: Text(
-                      widget.username[0].toUpperCase(),
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
+                  Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      CircleAvatar(
+                        radius: 16,
+                        backgroundColor: theme.colorScheme.primary,
+                        backgroundImage:
+                            (widget.avatarUrl != null &&
+                                widget.avatarUrl!.isNotEmpty)
+                                ? NetworkImage(widget.avatarUrl!)
+                                : null,
+                        child: (widget.avatarUrl != null &&
+                                widget.avatarUrl!.isNotEmpty)
+                            ? null
+                            : Text(
+                                widget.username[0].toUpperCase(),
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                              ),
                       ),
-                    ),
+                      if (widget.onEditProfile != null)
+                        Positioned(
+                          right: -2,
+                          bottom: -2,
+                          child: Material(
+                            color: theme.colorScheme.surface,
+                            shape: CircleBorder(),
+                            shadowColor:
+                                theme.colorScheme.shadow.withValues(alpha: 0.4),
+                            elevation: 2,
+                            child: InkWell(
+                              customBorder: const CircleBorder(),
+                              onTap: widget.onEditProfile,
+                              child: Padding(
+                                padding: const EdgeInsets.all(2),
+                                child: Icon(
+                                  Icons.edit_rounded,
+                                  size: 10,
+                                  color: theme.colorScheme.primary,
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+                    ],
                   ),
                   const SizedBox(width: 10),
                   Expanded(

@@ -14,7 +14,7 @@ CREATE TABLE IF NOT EXISTS chats (
   id SERIAL PRIMARY KEY,
   user_id INT REFERENCES users(id) ON DELETE CASCADE,
   title VARCHAR(255) DEFAULT 'New Chat',
-  model VARCHAR(100) DEFAULT 'mk/sonnet-4.5',
+  model VARCHAR(100) DEFAULT 'mk/haiku-4.5',
   created_at TIMESTAMPTZ DEFAULT NOW(),
   updated_at TIMESTAMPTZ DEFAULT NOW()
 );

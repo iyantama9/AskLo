@@ -1,0 +1,12 @@
+{
+  "deepseek": "lib/assets/logos/deepseek.png",
+  "openai": "lib/assets/logos/openai.png",
+  "gemini": "lib/assets/logos/gemini.png",
+  "grok": "lib/assets/logos/grok.png",
+  "glm": "lib/assets/logos/glm.png",
+  "kimi": "lib/assets/logos/kimi.png",
+  "qwen": "lib/assets/logos/qwen.png",
+  "claude": "lib/assets/logos/claude.png",
+  "llama": "lib/assets/logos/llama.png",
+  "mistral": "lib/assets/logos/mistral.png"
+}

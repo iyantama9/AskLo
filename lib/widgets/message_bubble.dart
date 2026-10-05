@@ -12,6 +12,166 @@ import 'package:url_launcher/url_launcher.dart';
 import '../core/constants.dart';
 import '../models/message_model.dart';
 
+/// Opens a full-screen image lightbox.
+void showImageLightbox(
+  BuildContext context, {
+  required List<int>? bytes,
+  required String url,
+  required String label,
+}) {
+  final theme = Theme.of(context);
+  showDialog<void>(
+    context: context,
+    barrierColor: Colors.black.withValues(alpha: 0.72),
+    builder: (_) => _ImageLightbox(
+      bytes: bytes,
+      url: url,
+      label: label,
+      onOpenExternal: (target) =>
+          launchUrl(Uri.parse(target), mode: LaunchMode.externalApplication),
+      theme: theme,
+    ),
+  );
+}
+
+class _ImageLightbox extends StatelessWidget {
+  final List<int>? bytes;
+  final String url;
+  final String label;
+  final Future<void> Function(String target) onOpenExternal;
+  final ThemeData theme;
+
+  const _ImageLightbox({
+    required this.bytes,
+    required this.url,
+    required this.label,
+    required this.onOpenExternal,
+    required this.theme,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final bytes = widget.bytes;
+    final url = widget.url;
+    final label = widget.label;
+    final onOpenExternal = widget.onOpenExternal;
+    final theme = widget.theme;
+    return Center(
+      child: ConstrainedBox(
+        constraints: BoxConstraints(
+          maxWidth: MediaQuery.sizeOf(context).width * 0.86,
+          maxHeight: MediaQuery.sizeOf(context).height * 0.86,
+        ),
+        child: Stack(
+          alignment: Alignment.topRight,
+          clipBehavior: Clip.none,
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(18),
+              child: bytes != null && bytes.isNotEmpty
+                  ? Image.memory(Uint8List.fromList(bytes), fit: BoxFit.contain)
+                  : Image.network(
+                      url,
+                      fit: BoxFit.contain,
+                      gaplessPlayback: true,
+                      errorBuilder: (context, error, stack) =>
+                          _buildLightboxBroken(theme, label),
+                    ),
+            ),
+            Positioned(
+              right: 4,
+              top: 4,
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Material(
+                    color: Colors.black.withValues(alpha: 0.6),
+                    borderRadius: BorderRadius.circular(20),
+                    child: IconButton(
+                      onPressed: () => onOpenExternal(url),
+                      icon: const Icon(
+                        Icons.open_in_new_rounded,
+                        size: 18,
+                        color: Colors.white,
+                      ),
+                      tooltip: 'Buka di tab baru',
+                      constraints: BoxConstraints(),
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                  Material(
+                    color: Colors.black.withValues(alpha: 0.6),
+                    borderRadius: BorderRadius.circular(20),
+                    child: IconButton(
+                      onPressed: () => Navigator.of(context).pop(),
+                      icon: const Icon(
+                        Icons.close_rounded,
+                        size: 18,
+                        color: Colors.white,
+                      ),
+                      tooltip: 'Tutup',
+                      constraints: BoxConstraints(),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (label.isNotEmpty)
+              Positioned(
+                left: 10,
+                bottom: 10,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 6,
+                  ),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.55),
+                    borderRadius: BorderRadius.circular(14),
+                  ),
+                  child: Text(
+                    label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLightboxBroken(ThemeData theme, String label) {
+    return Container(
+      width: 260,
+      height: 200,
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surface,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              Icons.broken_image_rounded,
+              size: 32,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(height: 8),
+            Text(label, style: theme.textTheme.bodySmall),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 String normalizeMathMarkdown(String markdown) {
   return markdown.replaceAllMapped(RegExp(r'```[ \t]*\n([\s\S]*?)\n```'), (
     match,
@@ -71,6 +231,7 @@ class MessageBubble extends StatefulWidget {
   final Animation<double>? animation;
   final VoidCallback? onRetry;
   final ValueChanged<String>? onOpenArtifact;
+  final void Function(MessageAttachment attachment)? onOpenImage;
 
   /// Live text source while this message is streaming. Only this bubble
   /// listens, so token updates never rebuild the rest of the screen.
@@ -82,6 +243,7 @@ class MessageBubble extends StatefulWidget {
     this.animation,
     this.onRetry,
     this.onOpenArtifact,
+    this.onOpenImage,
     this.streamingText,
   });
 
@@ -165,7 +327,12 @@ class _MessageBubbleState extends State<MessageBubble>
     final isThinking = msg.isThinking;
     final isImageLoading = msg.isImageLoading;
     final isTyping = msg.isTyping;
-    final isDone = !msg.isLoading && !isBrowsing && !isThinking && !isImageLoading && !isTyping;
+    final isDone =
+        !msg.isLoading &&
+        !isBrowsing &&
+        !isThinking &&
+        !isImageLoading &&
+        !isTyping;
 
     Widget bubble = Container(
       margin: EdgeInsets.only(
@@ -241,7 +408,12 @@ class _MessageBubbleState extends State<MessageBubble>
               ),
             ),
             child: msg.isError
-                ? _buildErrorCard(theme, msg)
+                ? Align(
+                    alignment: isUser
+                        ? Alignment.centerRight
+                        : Alignment.centerLeft,
+                    child: _buildErrorCard(theme, msg),
+                  )
                 : isBrowsing
                 ? _buildBrowsingIndicator(theme)
                 : isThinking
@@ -263,7 +435,10 @@ class _MessageBubbleState extends State<MessageBubble>
                       if (msg.attachments.isNotEmpty) ...[
                         if (msg.content.trim().isNotEmpty)
                           const SizedBox(height: 12),
-                        _SentAttachmentPreviewGrid(attachments: msg.attachments),
+                        _SentAttachmentPreviewGrid(
+                          attachments: msg.attachments,
+                          onOpenImage: widget.onOpenImage,
+                        ),
                       ],
                     ],
                   )
@@ -388,12 +563,8 @@ class _MessageBubbleState extends State<MessageBubble>
             ),
           },
           onTapLink: (text, href, title) => _openSafeLink(href),
-          sizedImageBuilder: (config) => _buildImage(
-            config.uri,
-            config.title,
-            config.alt,
-            theme,
-          ),
+          sizedImageBuilder: (config) =>
+              _buildImage(config.uri, config.title, config.alt, theme),
         ),
         if (msg.artifact != null) ...[
           const SizedBox(height: 12),
@@ -425,8 +596,7 @@ class _MessageBubbleState extends State<MessageBubble>
     }
     if (!_isSafeHttpUrl(uri)) return false;
     final host = uri.host.toLowerCase();
-    return host == 'asklo.iyantama.tech' ||
-        host == 'www.asklo.iyantama.tech';
+    return host == 'asklo.iyantama.tech' || host == 'www.asklo.iyantama.tech';
   }
 
   Future<void> _openSafeLink(String? href) async {
@@ -528,10 +698,7 @@ class _MessageBubbleState extends State<MessageBubble>
     );
   }
 
-  Widget _buildImagePlaceholder(
-    ThemeData theme,
-    ImageChunkEvent? progress,
-  ) {
+  Widget _buildImagePlaceholder(ThemeData theme, ImageChunkEvent? progress) {
     final value = progress?.expectedTotalBytes == null
         ? null
         : progress!.cumulativeBytesLoaded / progress.expectedTotalBytes!;
@@ -541,7 +708,9 @@ class _MessageBubbleState extends State<MessageBubble>
       decoration: BoxDecoration(
         color: const Color(0xFF0D0D1A),
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: theme.colorScheme.outline.withValues(alpha: 0.16)),
+        border: Border.all(
+          color: theme.colorScheme.outline.withValues(alpha: 0.16),
+        ),
       ),
       child: Center(
         child: Column(
@@ -581,11 +750,21 @@ class _MessageBubbleState extends State<MessageBubble>
 
     final canOpenDownload = _isSafeHttpUrl(safeUri);
 
+    final content = _buildImageContent(imageUrl, safeUri, theme);
+
+    Widget openable = content;
+    if (canOpenDownload) {
+      openable = GestureDetector(
+        onTap: () => _openSafeLink(imageUrl),
+        child: MouseRegion(cursor: SystemMouseCursors.click, child: content),
+      );
+    }
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Stack(
         children: [
-          _buildImageContent(imageUrl, safeUri, theme),
+          openable,
           if (canOpenDownload)
             Positioned(
               right: 8,
@@ -704,62 +883,82 @@ class _MessageBubbleState extends State<MessageBubble>
   }
 
   Widget _buildErrorCard(ThemeData theme, ChatMessage msg) {
-    final lines = msg.content.split('\n').where((line) => line.trim().isNotEmpty).toList();
+    final lines = msg.content
+        .split('\n')
+        .where((line) => line.trim().isNotEmpty)
+        .toList();
     final title = lines.isEmpty ? 'Pesan gagal dikirim' : lines.first;
     final details = lines.skip(1).join('\n');
+    final showToggle = details.isNotEmpty;
+    final isCompact = msg.requestId == null;
 
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
+      padding: isCompact
+          ? const EdgeInsets.symmetric(horizontal: 14, vertical: 10)
+          : const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: theme.colorScheme.errorContainer.withValues(alpha: 0.72),
-        borderRadius: BorderRadius.circular(16),
+        color: theme.colorScheme.errorContainer.withValues(alpha: 0.5),
+        borderRadius: isCompact
+            ? BorderRadius.circular(999)
+            : BorderRadius.circular(16),
         border: Border.all(
-          color: theme.colorScheme.error.withValues(alpha: 0.28),
+          color: theme.colorScheme.error.withValues(alpha: 0.25),
         ),
       ),
       child: Row(
+        mainAxisSize: isCompact ? MainAxisSize.min : MainAxisSize.max,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Container(
-            width: 34,
-            height: 34,
-            decoration: BoxDecoration(
-              color: theme.colorScheme.error.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(12),
-            ),
-            child: Icon(
-              Icons.warning_amber_rounded,
-              color: theme.colorScheme.error,
-              size: 20,
-            ),
+          Icon(
+            Icons.warning_amber_rounded,
+            size: 18,
+            color: theme.colorScheme.error,
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           Expanded(
             child: Column(
+              mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
                   title,
-                  style: theme.textTheme.bodyMedium?.copyWith(
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodySmall?.copyWith(
                     color: theme.colorScheme.onErrorContainer,
-                    fontWeight: FontWeight.w800,
-                    height: 1.35,
+                    fontWeight: FontWeight.w700,
+                    height: 1.3,
                   ),
                 ),
-                if (details.isNotEmpty) ...[
-                  const SizedBox(height: 6),
-                  SelectableText(
+                if (showToggle) ...[
+                  const SizedBox(height: 4),
+                  Text(
                     details,
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: theme.colorScheme.onErrorContainer.withValues(alpha: 0.82),
-                      height: 1.35,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: theme.colorScheme.onErrorContainer.withValues(
+                        alpha: 0.8,
+                      ),
+                      height: 1.3,
                     ),
                   ),
                 ],
               ],
             ),
           ),
+          if (msg.requestId != null)
+            Padding(
+              padding: const EdgeInsets.only(left: 10),
+              child: SelectableText(
+                'ID ${msg.requestId}',
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: theme.colorScheme.onErrorContainer.withValues(
+                    alpha: 0.6,
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -894,7 +1093,9 @@ class _ArtifactMessageCardState extends State<_ArtifactMessageCard>
                 boxShadow: _hovered
                     ? [
                         BoxShadow(
-                          color: theme.colorScheme.primary.withValues(alpha: 0.15),
+                          color: theme.colorScheme.primary.withValues(
+                            alpha: 0.15,
+                          ),
                           blurRadius: 20,
                           offset: const Offset(0, 4),
                         ),
@@ -915,16 +1116,22 @@ class _ArtifactMessageCardState extends State<_ArtifactMessageCard>
                           gradient: LinearGradient(
                             colors: [
                               theme.colorScheme.primary.withValues(alpha: 0.25),
-                              theme.colorScheme.tertiary.withValues(alpha: 0.15),
+                              theme.colorScheme.tertiary.withValues(
+                                alpha: 0.15,
+                              ),
                             ],
                           ),
                           borderRadius: BorderRadius.circular(14),
                           border: Border.all(
-                            color: theme.colorScheme.primary.withValues(alpha: 0.2),
+                            color: theme.colorScheme.primary.withValues(
+                              alpha: 0.2,
+                            ),
                           ),
                         ),
                         child: Icon(
-                          isCode ? Icons.code_rounded : Icons.description_rounded,
+                          isCode
+                              ? Icons.code_rounded
+                              : Icons.description_rounded,
                           color: theme.colorScheme.primary,
                           size: 24,
                         ),
@@ -954,7 +1161,9 @@ class _ArtifactMessageCardState extends State<_ArtifactMessageCard>
                                     vertical: 3,
                                   ),
                                   decoration: BoxDecoration(
-                                    color: theme.colorScheme.primary.withValues(alpha: 0.15),
+                                    color: theme.colorScheme.primary.withValues(
+                                      alpha: 0.15,
+                                    ),
                                     borderRadius: BorderRadius.circular(6),
                                   ),
                                   child: Text(
@@ -990,8 +1199,14 @@ class _ArtifactMessageCardState extends State<_ArtifactMessageCard>
                         decoration: BoxDecoration(
                           borderRadius: BorderRadius.circular(2),
                           gradient: LinearGradient(
-                            begin: Alignment(-1.0 + 2.0 * _shimmerController.value, 0),
-                            end: Alignment(-0.5 + 2.0 * _shimmerController.value, 0),
+                            begin: Alignment(
+                              -1.0 + 2.0 * _shimmerController.value,
+                              0,
+                            ),
+                            end: Alignment(
+                              -0.5 + 2.0 * _shimmerController.value,
+                              0,
+                            ),
                             colors: [
                               Colors.transparent,
                               theme.colorScheme.primary.withValues(alpha: 0.4),
@@ -1036,8 +1251,12 @@ class _ArtifactMessageCardState extends State<_ArtifactMessageCard>
 
 class _SentAttachmentPreviewGrid extends StatelessWidget {
   final List<MessageAttachment> attachments;
+  final void Function(MessageAttachment attachment)? onOpenImage;
 
-  const _SentAttachmentPreviewGrid({required this.attachments});
+  const _SentAttachmentPreviewGrid({
+    required this.attachments,
+    this.onOpenImage,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -1045,25 +1264,41 @@ class _SentAttachmentPreviewGrid extends StatelessWidget {
       spacing: 8,
       runSpacing: 8,
       children: attachments
-          .map((attachment) => _SentAttachmentCard(attachment: attachment))
+          .map(
+            (attachment) => _SentAttachmentCard(
+              attachment: attachment,
+              onOpenImage: onOpenImage,
+            ),
+          )
           .toList(),
     );
   }
 }
 
-class _SentAttachmentCard extends StatelessWidget {
+class _SentAttachmentCard extends StatefulWidget {
   final MessageAttachment attachment;
+  final void Function(MessageAttachment attachment)? onOpenImage;
 
-  const _SentAttachmentCard({required this.attachment});
+  const _SentAttachmentCard({required this.attachment, this.onOpenImage});
+
+  @override
+  State<_SentAttachmentCard> createState() => _SentAttachmentCardState();
+}
+
+class _SentAttachmentCardState extends State<_SentAttachmentCard> {
+  bool _hovered = false;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final attachment = widget.attachment;
     final isMobile = MediaQuery.sizeOf(context).width < 600;
     final width = attachment.isImage ? (isMobile ? 118.0 : 154.0) : 220.0;
     final height = attachment.isImage ? (isMobile ? 118.0 : 144.0) : 76.0;
 
-    return Container(
+    final canOpen = attachment.isImage && widget.onOpenImage != null;
+
+    Widget body = Container(
       width: width,
       height: height,
       clipBehavior: Clip.antiAlias,
@@ -1071,17 +1306,36 @@ class _SentAttachmentCard extends StatelessWidget {
         color: theme.colorScheme.surface.withValues(alpha: 0.72),
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: theme.colorScheme.primary.withValues(alpha: 0.22),
+          color: _hovered && canOpen
+              ? theme.colorScheme.primary.withValues(alpha: 0.5)
+              : theme.colorScheme.primary.withValues(alpha: 0.22),
+          width: _hovered && canOpen ? 1.5 : 1,
         ),
       ),
       child: attachment.isImage
           ? _buildImagePreview(theme)
           : _buildFilePreview(theme),
     );
+
+    if (!canOpen) {
+      return body;
+    }
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      child: GestureDetector(
+        onTapDown: (_) => setState(() => _hovered = true),
+        onTapUp: (_) => setState(() => _hovered = false),
+        onTapCancel: () => setState(() => _hovered = false),
+        onTap: () => widget.onOpenImage!(attachment),
+        child: body,
+      ),
+    );
   }
 
   Widget _buildImagePreview(ThemeData theme) {
-    final bytes = attachment.previewBytes;
+    final bytes = widget.attachment.previewBytes;
     if (bytes != null && bytes.isNotEmpty) {
       return Stack(
         fit: StackFit.expand,
@@ -1091,6 +1345,27 @@ class _SentAttachmentCard extends StatelessWidget {
             fit: BoxFit.cover,
             errorBuilder: (_, __, ___) => _buildFilePreview(theme),
           ),
+          if (_hovered)
+            Positioned.fill(
+              child: Container(color: Colors.black.withValues(alpha: 0.18)),
+            ),
+          if (_hovered)
+            Positioned(
+              right: 8,
+              top: 8,
+              child: Material(
+                color: Colors.black.withValues(alpha: 0.62),
+                borderRadius: BorderRadius.circular(20),
+                child: const Padding(
+                  padding: EdgeInsets.all(6),
+                  child: Icon(
+                    Icons.zoom_in_rounded,
+                    size: 16,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+            ),
           Positioned(
             left: 8,
             right: 8,
@@ -1104,6 +1379,7 @@ class _SentAttachmentCard extends StatelessWidget {
   }
 
   Widget _buildFilePreview(ThemeData theme) {
+    final attachment = widget.attachment;
     return Padding(
       padding: const EdgeInsets.all(10),
       child: Row(
@@ -1152,6 +1428,7 @@ class _SentAttachmentCard extends StatelessWidget {
   }
 
   Widget _caption(ThemeData theme, IconData icon) {
+    final attachment = widget.attachment;
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
       decoration: BoxDecoration(
@@ -1176,7 +1453,7 @@ class _SentAttachmentCard extends StatelessWidget {
   }
 
   IconData get _icon {
-    final ext = attachment.extension;
+    final ext = widget.attachment.extension;
     if (ext == 'pdf') return Icons.picture_as_pdf_rounded;
     if (['ppt', 'pptx'].contains(ext)) return Icons.slideshow_rounded;
     if (['txt', 'md', 'log', 'csv'].contains(ext)) return Icons.notes_rounded;
@@ -1184,7 +1461,7 @@ class _SentAttachmentCard extends StatelessWidget {
   }
 
   String get _label {
-    final ext = attachment.extension;
+    final ext = widget.attachment.extension;
     if (ext == 'pdf') return 'PDF';
     if (['ppt', 'pptx'].contains(ext)) return 'Presentation';
     if (['txt', 'md', 'log', 'csv'].contains(ext)) return 'Text file';
@@ -1344,17 +1621,25 @@ class _ImageLoadingDotsPainter extends CustomPainter {
         final diagonal = column + row;
         final distance = (diagonal - wave).abs();
         final highlight = math.max(0.0, 1.0 - distance / 4.0);
-        final centerBias = 1 -
+        final centerBias =
+            1 -
             math.min(
               1.0,
               ((x - size.width * 0.62).abs() / size.width) +
                   ((y - size.height * 0.48).abs() / size.height),
             );
         final alpha = 0.12 + (highlight * 0.42) + (centerBias * 0.12);
-        final safeAlpha = alpha < 0.08 ? 0.08 : alpha > 0.68 ? 0.68 : alpha;
+        final safeAlpha = alpha < 0.08
+            ? 0.08
+            : alpha > 0.68
+            ? 0.68
+            : alpha;
         final radius = 1.35 + (highlight * 0.75);
-        final color = Color.lerp(dotColor, accentColor, highlight * 0.28)!
-            .withValues(alpha: safeAlpha.toDouble());
+        final color = Color.lerp(
+          dotColor,
+          accentColor,
+          highlight * 0.28,
+        )!.withValues(alpha: safeAlpha.toDouble());
 
         canvas.drawCircle(Offset(x, y), radius, Paint()..color = color);
       }

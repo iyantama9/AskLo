@@ -36,12 +36,51 @@ async function checkQuota(userId, kind, amount = 1) {
   const limit = getLimit(kind);
   if (limit === 0) return { allowed: false, used: await getUsage(userId, kind), limit };
 
+  // Check for active promotions with unlimited quota
+  const promoResult = await pool.query(
+    `SELECT p.unlimited_quota, p.quota_multiplier, p.custom_limits
+     FROM user_promotions up
+     JOIN promotions p ON up.promotion_id = p.id
+     WHERE up.user_id = $1
+       AND p.is_active = true
+       AND NOW() BETWEEN p.start_date AND p.end_date
+     ORDER BY p.unlimited_quota DESC, p.quota_multiplier DESC
+     LIMIT 1`,
+    [userId]
+  );
+
+  // If user has unlimited promotion, allow
+  if (promoResult.rows.length > 0 && promoResult.rows[0].unlimited_quota) {
+    return {
+      allowed: true,
+      used: await getUsage(userId, kind),
+      limit: Infinity,
+      remaining: Infinity,
+      promotion: true,
+    };
+  }
+
+  // If user has quota multiplier, apply it
+  let effectiveLimit = limit;
+  if (promoResult.rows.length > 0 && promoResult.rows[0].quota_multiplier) {
+    effectiveLimit = Math.floor(limit * promoResult.rows[0].quota_multiplier);
+  }
+
+  // Check custom limits from promotion
+  if (promoResult.rows.length > 0 && promoResult.rows[0].custom_limits) {
+    const customLimits = promoResult.rows[0].custom_limits;
+    if (customLimits[kind]) {
+      effectiveLimit = customLimits[kind];
+    }
+  }
+
   const used = await getUsage(userId, kind);
   return {
-    allowed: used + amount <= limit,
+    allowed: used + amount <= effectiveLimit,
     used,
-    limit,
-    remaining: Math.max(0, limit - used),
+    limit: effectiveLimit,
+    remaining: Math.max(0, effectiveLimit - used),
+    promotion: promoResult.rows.length > 0,
   };
 }
 

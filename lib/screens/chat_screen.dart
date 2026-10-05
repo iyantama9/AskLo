@@ -12,6 +12,7 @@ import '../widgets/chat_input.dart';
 import '../widgets/chat_sidebar.dart';
 import '../widgets/message_bubble.dart';
 import '../widgets/model_selector.dart';
+import '../widgets/profile_editor_dialog.dart';
 import '../widgets/welcome_view.dart';
 import 'playground_screen.dart' deferred as playground;
 
@@ -41,9 +42,9 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
 
   List<Map<String, dynamic>> _chats = [];
   List<ChatMessage> _messages = [];
-  List<ModelInfo> _models = ChatService.allModels;
+  List<ModelInfo> _models = [];
   int? _selectedChatId;
-  String _currentModel = AppConstants.defaultModel;
+  String? _currentModel;
   bool _isLoading = false;
   bool _isSubmittingFeedback = false;
   bool _sidebarOpen = true;
@@ -67,13 +68,12 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   // Active tools
   final Set<ChatTool> _activeTools = {};
 
-  // Reasoning toggle for Claude models that expose a separate thinking id.
-  bool _reasoningEnabled = false;
+  // Profile (nickname + avatar)
+  String? _profileDisplayName;
+  String? _profileAvatarUrl;
 
-  static const Map<String, String> _reasoningModelPairs = {
-    'mk/sonnet-4.5': 'mk/sonnet-4.5-thinking',
-    'mk/haiku-4.5': 'mk/haiku-4.5-thinking',
-  };
+  // Reasoning toggle for models that expose a separate thinking id.
+  bool _reasoningEnabled = false;
 
   @override
   void initState() {
@@ -81,18 +81,48 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     _loadModelCatalog();
     _loadChats();
     _loadUsage();
+    _loadProfile();
     // Setup web clipboard paste listener for images
     setupWebPasteListener(_onImagePasted);
   }
 
+  Future<void> _loadProfile() async {
+    if (!_api.isLoggedIn) return;
+    try {
+      final data = await _api.getProfile();
+      if (!mounted) return;
+      final user = data['user'] as Map?;
+      setState(() {
+        _profileDisplayName = user?['display_name']?.toString() ?? _api.username;
+        _profileAvatarUrl = user?['avatar_url']?.toString();
+      });
+    } catch (_) {}
+  }
+
+  Future<void> _openProfileEditor() async {
+    if (!_api.isLoggedIn) return;
+    final currentName = _profileDisplayName ?? _api.username ?? '';
+    await ProfileEditorDialog.show(
+      context,
+      displayName: currentName,
+      avatarUrl: _profileAvatarUrl,
+      onChanged: (_) {},
+    );
+    if (!mounted) return;
+    await _loadProfile();
+  }
+
   Future<void> _loadModelCatalog() async {
-    final models = await ChatService().getModels();
+    final catalog = await ApiService().getModelCatalog();
+    final models = catalog.models.map(ModelInfo.fromJson).toList();
     if (!mounted) return;
     setState(() {
-      _models = models.isEmpty ? ChatService.allModels : models;
-      if (!_models.any((m) => m.id == _currentModel)) {
-        _currentModel = _models.first.id;
-      }
+      _models = models;
+      // Preserve the in-use model when it is still served; otherwise fall back
+      // to the admin-configured default (or the first available model).
+      _currentModel = _models.any((m) => m.id == _currentModel)
+          ? _currentModel
+          : catalog.defaultModel ?? (_models.isEmpty ? null : _models.first.id);
     });
   }
 
@@ -708,27 +738,39 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     });
   }
 
+  // Reasoning pairs are derived from the live catalog: any model whose id ends
+  // in "-thinking" is the thinking twin of the same id without that suffix,
+  // when that base model is also served. No static model ids are assumed.
+  String _thinkingIdFor(String model) =>
+      model.endsWith('-thinking') ? model : '$model-thinking';
+
+  bool _catalogServes(String modelId) => _models.any((m) => m.id == modelId);
+
   String _baseReasoningModel(String model) {
-    for (final entry in _reasoningModelPairs.entries) {
-      if (entry.value == model) return entry.key;
+    if (model.endsWith('-thinking') &&
+        _catalogServes(model.substring(0, model.length - '-thinking'.length))) {
+      return model.substring(0, model.length - '-thinking'.length);
     }
     return model;
   }
 
   String? _thinkingModelFor(String model) {
-    return _reasoningModelPairs[_baseReasoningModel(model)];
+    final base = _baseReasoningModel(model);
+    final thinking = _thinkingIdFor(base);
+    if (thinking == base) return null;
+    return _catalogServes(thinking) ? thinking : null;
   }
 
   bool _isThinkingModel(String model) {
-    return _reasoningModelPairs.values.contains(model);
+    return _catalogServes(model) &&
+        _catalogServes(_baseReasoningModel(model));
   }
 
   bool _supportsReasoningModel(String model) {
     final base = _baseReasoningModel(model);
     final thinking = _thinkingModelFor(model);
     if (thinking == null) return false;
-    return _models.any((m) => m.id == base) &&
-        _models.any((m) => m.id == thinking);
+    return _catalogServes(base) && _catalogServes(thinking);
   }
 
   Future<void> _selectChat(int chatId) async {
@@ -744,7 +786,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
     final model = chat['model'] as String? ?? _currentModel;
     setState(() {
       _currentModel = model;
-      _reasoningEnabled = _isThinkingModel(model);
+      _reasoningEnabled = model != null && _isThinkingModel(model);
       if (_reasoningEnabled) {
         _activeTools.add(ChatTool.reasoning);
       } else {
@@ -816,6 +858,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
   }
 
   void _handleReasoningToggle(bool enabled) {
+    if (_currentModel == null) return;
     String? modelToPersist;
 
     setState(() {
@@ -826,8 +869,8 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         _activeTools.remove(ChatTool.reasoning);
       }
 
-      final baseModel = _baseReasoningModel(_currentModel);
-      final thinkingModel = _reasoningModelPairs[baseModel];
+      final baseModel = _baseReasoningModel(_currentModel!);
+      final thinkingModel = _thinkingModelFor(baseModel);
       if (thinkingModel != null) {
         _currentModel = enabled ? thinkingModel : baseModel;
         modelToPersist = _currentModel;
@@ -1127,7 +1170,9 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
       onRenameChat: _renameChat,
       onDeleteChat: _deleteChat,
       onLogout: widget.onLogout,
-      username: _api.username ?? '',
+      username: _profileDisplayName ?? _api.username ?? '',
+      avatarUrl: _profileAvatarUrl,
+      onEditProfile: _openProfileEditor,
     );
 
     final chatBody = Column(
@@ -1203,6 +1248,12 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                                 ? () => _retryMessage(msg.id)
                                 : null,
                             onOpenArtifact: _openArtifact,
+                            onOpenImage: (attachment) => showImageLightbox(
+                              context,
+                              bytes: attachment.previewBytes,
+                              url: attachment.url,
+                              label: attachment.name,
+                            ),
                           ),
                         );
                       },
@@ -1227,7 +1278,9 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
                 onClearAllAttachments: _clearAllAttachments,
                 activeTools: _activeTools,
                 onToolToggled: _handleToolToggle,
-                supportsReasoning: _supportsReasoningModel(_currentModel),
+                supportsReasoning: _currentModel != null
+                    ? _supportsReasoningModel(_currentModel!)
+                    : false,
                 currentModelSupportsVision: _models
                     .firstWhere(
                       (m) => m.id == _currentModel,
@@ -1323,7 +1376,7 @@ class _ChatScreenState extends State<ChatScreen> with TickerProviderStateMixin {
         Padding(
           padding: const EdgeInsets.symmetric(vertical: 8),
           child: ModelSelector(
-            currentModel: _currentModel,
+            currentModel: _currentModel ?? '',
             models: _models,
             onModelChanged: (model) {
               final nextModel = _reasoningEnabled

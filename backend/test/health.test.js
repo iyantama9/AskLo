@@ -39,10 +39,11 @@ const REQUIRED_ENV = {
   JWT_SECRET: 'test-secret',
   AI_BASE_URL: 'https://ai.example.test',
   AI_API_KEY: 'test-ai-key',
-  R2_ACCOUNT_ID: 'test-account',
-  R2_ACCESS_KEY_ID: 'test-access',
-  R2_SECRET_ACCESS_KEY: 'test-secret-key',
-  R2_BUCKET_NAME: 'test-bucket',
+  MINIO_ENDPOINT: 'localhost:9000',
+  MINIO_ACCESS_KEY: 'test-access',
+  MINIO_SECRET_KEY: 'test-secret-key',
+  MINIO_BUCKET: 'test-bucket',
+  MINIO_PUBLIC_ENDPOINT: 'localhost:9000',
 };
 
 process.env = { ...ORIGINAL_ENV, ...REQUIRED_ENV };
@@ -71,10 +72,11 @@ describe('health endpoints', () => {
 
     const response = await request(app).get('/api/health/ready').expect(200);
 
-    expect(response.body).toEqual({
+    expect(response.body).toMatchObject({
       status: 'ok',
       checks: { config: 'ok', database: 'ok' },
     });
+    expect(response.body.db_pool).toBeDefined();
     expect(pool.query).toHaveBeenCalledWith('SELECT 1');
   });
 
@@ -83,9 +85,11 @@ describe('health endpoints', () => {
 
     const response = await request(app).get('/api/health/ready').expect(503);
 
-    expect(response.body.status).toBe('error');
+    expect(response.body.error).toBe('Readiness check failed');
     expect(response.body.code).toBe('READINESS_FAILED');
     expect(response.body.missing_env).toContain('JWT_SECRET');
+    expect(response.body.request_id).toBeDefined();
+    expect(response.body.status).toBeUndefined();
   });
 
   test('getMissingEnv lists missing config names', () => {

@@ -19,20 +19,100 @@
   <meta charset="UTF-8">
   <meta content="IE=Edge" http-equiv="X-UA-Compatible">
   <meta name="description" content="GetAI Chatbot App">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, interactive-widget=resizes-content">
+  <meta name="theme-color" content="#0F0F14">
+
+  <style>
+    html,
+    body {
+      height: 100%;
+      min-height: 100%;
+      margin: 0;
+      background: #0F0F14;
+      overscroll-behavior: none;
+    }
+
+    body {
+      overflow: hidden;
+    }
+
+    flutter-view,
+    flt-glass-pane {
+      background: #0F0F14;
+    }
+
+    /* Splash shown while main.dart.js + CanvasKit download; removed on
+       the flutter-first-frame event. */
+    #splash {
+      position: fixed;
+      inset: 0;
+      z-index: 9999;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      background: #0F0F14;
+      transition: opacity 300ms ease;
+    }
+
+    #splash.splash-hidden {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    #splash img {
+      width: 72px;
+      height: 72px;
+      border-radius: 18px;
+      animation: splash-pulse 1.6s ease-in-out infinite;
+    }
+
+    #splash .splash-spinner {
+      width: 22px;
+      height: 22px;
+      border: 2.5px solid rgba(167, 139, 250, 0.22);
+      border-top-color: #A78BFA;
+      border-radius: 50%;
+      animation: splash-spin 0.9s linear infinite;
+    }
+
+    @keyframes splash-spin {
+      to { transform: rotate(360deg); }
+    }
+
+    @keyframes splash-pulse {
+      0%, 100% { opacity: 1; transform: scale(1); }
+      50% { opacity: 0.72; transform: scale(0.96); }
+    }
+  </style>
 
   <!-- iOS meta tags & icons -->
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black">
-  <meta name="apple-mobile-web-app-title" content="AskCore">
+  <meta name="apple-mobile-web-app-title" content="AskLo">
   <link rel="apple-touch-icon" href="icons/Icon-192.png">
 
   <!-- Favicon -->
-  <link rel="icon" type="image/png" href="favicon.png?v=2"/>
+  <link rel="icon" type="image/png" href="favicon.png?v=3"/>
 
-  <title>AskCore</title>
+  <title>AskLo</title>
   <link rel="manifest" href="manifest.json">
 </head>
 <body>
+  <div id="splash">
+    <img src="icons/Icon-192.png" alt="">
+    <div class="splash-spinner"></div>
+  </div>
+  <script>
+    window.addEventListener('flutter-first-frame', function () {
+      var splash = document.getElementById('splash');
+      if (!splash) return;
+      splash.classList.add('splash-hidden');
+      setTimeout(function () { splash.remove(); }, 350);
+    });
+  </script>
+  <script src="sw-cleanup.js"></script>
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>

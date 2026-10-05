@@ -6,7 +6,12 @@ const { validatePublicHttpUrl } = require('../utils/urlSafety');
 const { assertCanReadR2Key, recordFile } = require('../utils/files');
 const { sendError } = require('../utils/errors');
 const { assertQuota, recordUsage } = require('../utils/usage');
-const { assertValidModel } = require('../utils/modelCatalog');
+const {
+  assertValidModel,
+  getFallbackModel,
+  getFallbackModels,
+} = require('../utils/modelCatalog');
+const { requestRouterMessages } = require('../utils/routerClient');
 const {
   artifactSummary,
   buildArtifactForResponse,
@@ -20,31 +25,15 @@ const { v4: uuidv4 } = require('uuid');
 const router = express.Router();
 router.use(authMiddleware);
 
-const TITLE_MODEL = 'qc/qwen-flash';
-const DEFAULT_TEXT_MODEL = 'mk/haiku-4.5';
-const IMAGE_GENERATION_MODELS = [
-  'qc/qwen-image-2.0',
-  'qc/qwen-image-2.0-pro',
-  'qc/qwen-image-2.0-2026-03-03',
-  'qc/qwen-image-2.0-pro-2026-06-22',
-  'qc/qwen-image-2.0-pro-2026-04-22',
-  'qc/qwen-image-2.0-pro-2026-03-03',
-  'qc/qwen-image-max',
-  'qc/qwen-image-max-2025-12-30',
-  'qc/qwen-image-plus',
-  'qc/qwen-image-plus-2026-01-09',
-  'qc/wan2.7-image-pro',
-  'qc/wan2.7-image',
-  'qc/z-image-turbo',
-];
-const IMAGE_EDIT_MODELS = [
-  'qc/qwen-image-edit',
-  'qc/qwen-image-edit-plus',
-  'qc/qwen-image-edit-plus-2025-12-15',
-  'qc/qwen-image-edit-plus-2025-10-30',
-  'qc/qwen-image-edit-max',
-  'qc/qwen-image-edit-max-2026-01-16',
-];
+async function selectEffectiveModel({ chatModel, tools = [], content = '', urls = [], names = [] }) {
+  const attachedImages = urls.filter((_, index) => isImageFileName(names[index] || ''));
+  const wantsEdit = attachedImages.length > 0 && wantsImageEdit(content, attachedImages);
+  if (tools.includes('create_image') || wantsEdit || wantsImageGeneration(content)) {
+    const imageModel = await getFallbackModel('image');
+    return imageModel || chatModel || await getFallbackModel('chat');
+  }
+  return chatModel || await getFallbackModel('chat');
+}
 
 function needsRealtimeInfo(text = '') {
   if (!text) return false;
@@ -122,22 +111,6 @@ async function createArtifact({ ownerId, chatId, messageId, artifact }) {
   return result.rows[0];
 }
 
-function selectEffectiveModel({ chatModel, tools = [], content = '', urls = [], names = [] }) {
-  const attachedImages = urls.filter((_, index) => isImageFileName(names[index] || ''));
-  if (tools.includes('create_image') || wantsImageEdit(content, attachedImages) || wantsImageGeneration(content)) {
-    return attachedImages.length > 0 && wantsImageEdit(content, attachedImages)
-      ? IMAGE_EDIT_MODELS[0]
-      : IMAGE_GENERATION_MODELS[0];
-  }
-  return chatModel || DEFAULT_TEXT_MODEL;
-}
-
-function getImageFallbackModels(model) {
-  if (IMAGE_EDIT_MODELS.includes(model)) return IMAGE_EDIT_MODELS;
-  if (IMAGE_GENERATION_MODELS.includes(model)) return IMAGE_GENERATION_MODELS;
-  return [];
-}
-
 function toAnthropicContent(content) {
   if (!Array.isArray(content)) return content;
 
@@ -156,7 +129,7 @@ function toAnthropicContent(content) {
   });
 }
 
-async function fetchAI({ model, messages, stream = false, max_tokens = 4096 }) {
+async function fetchAI({ model, messages, stream = false, max_tokens = null }) {
   const started = process.hrtime.bigint();
   const streamLabel = stream ? 'true' : 'false';
   const system = messages
@@ -172,20 +145,12 @@ async function fetchAI({ model, messages, stream = false, max_tokens = 4096 }) {
       content: toAnthropicContent(message.content),
     }));
 
-  const response = await fetch(`${process.env.AI_BASE_URL}/messages`, {
-    method: 'POST',
-    headers: {
-      'x-api-key': process.env.AI_API_KEY,
-      'anthropic-version': '2023-06-01',
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model,
-      messages: anthropicMessages,
-      ...(system ? { system } : {}),
-      max_tokens,
-      stream,
-    }),
+  const response = await requestRouterMessages({
+    model,
+    messages: anthropicMessages,
+    system,
+    max_tokens,
+    stream,
   });
 
   const durationMs = Number(process.hrtime.bigint() - started) / 1_000_000;
@@ -508,31 +473,33 @@ async function executeBrowseCommand(cmd, req) {
 // --- End browse helpers ---
 
 const getSystemPrompt = (model, tools = []) => {
-  let base = `Jawab dalam Bahasa Indonesia kecuali user meminta bahasa lain. SELALU gunakan format markdown yang rapi dan terstruktur untuk semua jawaban.
+  let base = `Kamu adalah asisten AI di platform GetAI (AskLo).
 
-ATURAN FORMAT OUTPUT (WAJIB):
-- Gunakan heading (##, ###) untuk struktur jawaban
-- Gunakan tabel markdown untuk data terstruktur (harga, spesifikasi, perbandingan)
-- Gunakan emoji yang relevan untuk visual clarity (💰 harga, 🔍 pencarian, 📊 data, ⚙️ spesifikasi, 🎯 kesimpulan, dll)
-- Gunakan bullet points untuk list
-- Gunakan bold (**text**) untuk highlight informasi penting
-- Gunakan blockquote (>) untuk catatan atau highlight khusus
-- Pisahkan section dengan horizontal rule (---) jika perlu
+IDENTITAS (penting):
+- Jika user bertanya siapa kamu atau model apa kamu, jawab bahwa kamu asisten AI di GetAI.
+- JANGAN mengidentifikasikan dirimu sebagai model atau brand lain (mis. Claude, GPT, Gemini, Llama, Qwen, atau nama apa pun). Jangan menyebut vendor/model di balik layar kecuali user secara eksplisit menanyakan detail teknis.
+- Jika user salah menebak modelmu, koreksi dengan sopan: kamu asisten GetAI, bukan model tersebut.
 
-Jika user melampirkan file (gambar, PDF, kode, CSV, teks, dll), isi file tersebut sudah diekstrak secara terstruktur dan disertakan langsung di dalam pesan user. Kamu BISA membaca dan menganalisis konten file tersebut.
+GAYA & BAHASA:
+- Jawab dalam Bahasa Indonesia yang natural, sopan, dan ramah — seperti asisten manusia, bukan mesin yang kaku.
+- Sesuaikan panjang jawaban dengan kebutuhan: pertanyaan sederhana dijawab singkat dan langsung; topik kompleks baru dijabarkan rinci.
+- Jangan berlebihan dan jangan memaksakan struktur pada jawaban yang memang sederhana.
 
-ATURAN ANALISIS DOKUMEN:
-- Jika user bertanya tentang file terlampir, jawab berdasarkan bagian dokumen yang diekstrak.
-- Jika ekstraksi dipotong, jelaskan bahwa kesimpulan berdasarkan konten yang berhasil diekstrak.
-- Untuk CSV, gunakan nama kolom dan sample yang tersedia; jangan mengarang statistik jika seluruh data tidak tersedia.
+FORMAT (gunakan secukupnya, bukan selalu):
+- Percakapan ringan (sapaan, konfirmasi, pertanyaan singkat) cukup kalimat biasa tanpa heading/tabel/emoji.
+- Gunakan markdown rapi HANYA ketika memang membantu: heading untuk topik kompleks, tabel untuk perbandingan atau data terstruktur, bullet untuk list, dan emoji secukupnya untuk kejelasan (jangan di setiap baris).
+- Fenced code block untuk kode program atau pseudocode.
+
+DOKUMEN TERLAMPIR:
+- Jika user melampirkan file (gambar, PDF, kode, CSV, teks), kontennya sudah diekstrak dan disertakan di pesan user. Kamu bisa membacanya.
+- Jawab berdasarkan bagian dokumen yang tersedia; jika ada yang terpotong, jelaskan bahwa kesimpulan berbasis konten yang berhasil diekstrak.
+- Untuk CSV gunakan nama kolom dan sample yang ada; jangan mengarang statistik.
 - Untuk file kode, pertahankan nama file, simbol, fungsi, class, dan baris kode setepat mungkin.
 
-FORMAT MATEMATIKA:
-- Tulis persamaan inline dengan delimiter LaTeX $...$.
-- Tulis persamaan yang berdiri sendiri dengan delimiter LaTeX display pada baris terpisah: $$ lalu persamaan lalu $$.
+MATEMATIKA:
+- Rumus inline pakai $...$; rumus display di baris sendiri pakai $$.
 - Gunakan sintaks LaTeX seperti \\frac, \\sqrt, \\sum, \\times, \\mod, subscript _, dan superscript ^.
-- JANGAN bungkus rumus matematika dalam fenced code block atau backtick.
-- Gunakan fenced code block hanya untuk kode program atau pseudocode.`;
+- JANGAN membungkus rumus matematika dalam fenced code block atau backtick.`;
 
   if (model && model.includes('image')) {
     base += ' Kamu memiliki kemampuan menghasilkan gambar. Jika user meminta gambar, langsung generate gambar sesuai permintaan tanpa menolak.';
@@ -687,7 +654,7 @@ router.post('/:chatId/messages', async (req, res) => {
       });
     }
 
-    let model = selectEffectiveModel({ chatModel, tools: effectiveTools, content, urls, names });
+    let model = await selectEffectiveModel({ chatModel, tools: effectiveTools, content, urls, names });
     let modelInfo = await assertValidModel(model);
     await assertQuota(req.userId, 'ai_request', 1);
     if (effectiveTools.includes('browse_web')) {
@@ -828,9 +795,16 @@ router.post('/:chatId/messages', async (req, res) => {
       let fullContent = '';
       const reader = aiResponse.body;
 
+      // Heartbeat: keep the client connection alive during long streams so a
+      // slow or long answer doesn't look "stuck". SSE comment lines are ignored
+      // by the client but refresh idle/proxy timeouts.
+      const heartbeat = setInterval(() => {
+        try { res.write(': keep-alive\n\n'); } catch { /* stream already closed */ }
+      }, 15000);
       // Handle image generation model — images come in non-standard format
       const isImageModel = model && model.includes('image');
 
+      try {
       for await (const chunk of reader) {
         const text = typeof chunk === 'string' ? chunk : Buffer.from(chunk).toString('utf-8');
         const lines = text.split('\n').filter(l => l.startsWith('data: '));
@@ -841,6 +815,17 @@ router.post('/:chatId/messages', async (req, res) => {
 
           try {
             const parsed = JSON.parse(data);
+            // Skip thinking/reasoning deltas — do NOT forward to the client.
+            if (
+              parsed.type === 'thinking_delta' ||
+              parsed.type === 'reasoning_delta' ||
+              (parsed.delta && parsed.delta.type &&
+               (parsed.delta.type.includes('thinking') ||
+                parsed.delta.type.includes('reasoning'))) ||
+              (parsed.choices?.[0]?.delta &&
+               (parsed.choices[0].delta.reasoning_content ||
+                parsed.choices[0].delta.thinking))
+            ) continue;
             const delta = parsed.type === 'content_block_delta'
               ? (parsed.delta?.text || '')
               : (parsed.choices?.[0]?.delta?.content || '');
@@ -856,6 +841,10 @@ router.post('/:chatId/messages', async (req, res) => {
             }
           } catch {}
         }
+      }
+
+      } finally {
+        clearInterval(heartbeat);
       }
 
       let artifactRow = null;
@@ -897,7 +886,7 @@ router.post('/:chatId/messages', async (req, res) => {
       if (chatTitleUpdated) {
         try {
           const titleResponse = await fetchAI({
-            model: TITLE_MODEL,
+            model: await getFallbackModel('chat'),
             messages: [{ role: 'user', content: `Buatkan judul singkat (maksimal 5 kata, tanpa tanda kutip) untuk percakapan yang dimulai dengan pesan ini: "${content}"` }],
             stream: false,
             max_tokens: 50,
@@ -931,12 +920,12 @@ router.post('/:chatId/messages', async (req, res) => {
     let aiResponse = await fetchAI({ model, messages, stream: false });
 
     if (!aiResponse.ok) {
-      const failoverModels = modelInfo.supports_image_generation
-        ? getImageFallbackModels(model)
-        : [];
+      const fallbackType = modelInfo.supports_image_generation ? 'image' : 'chat';
+      const failoverModels = await getFallbackModels(fallbackType);
       let lastError = null;
 
-      for (const candidate of failoverModels.slice(1)) {
+      for (const candidate of failoverModels) {
+        if (candidate === model) continue; // skip current model
         try {
           const candidateInfo = await assertValidModel(candidate);
           logger.warn('image_model_fallback_trying', {
@@ -1239,7 +1228,7 @@ router.post('/:chatId/messages', async (req, res) => {
       // First message — generate title
       try {
         const titleResponse = await fetchAI({
-          model: TITLE_MODEL,
+          model: await getFallbackModel('chat'),
           messages: [
             {
               role: 'user',

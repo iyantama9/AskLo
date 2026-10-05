@@ -1,4 +1,5 @@
 const express = require('express');
+const { uploadFile, getPublicUrl } = require('../utils/minio');
 const authMiddleware = require('../middleware/auth');
 const { validatePublicHttpUrl } = require('../utils/urlSafety');
 const { sendError } = require('../utils/errors');
@@ -129,25 +130,12 @@ router.post('/', async (req, res) => {
       fullPage: false,
     });
 
-    const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
-    const s3 = new S3Client({
-      region: 'auto',
-      endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-      credentials: {
-        accessKeyId: process.env.R2_ACCESS_KEY_ID,
-        secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
-      },
+    const key = `browse/${req.userId}/${Date.now()}.jpg`;
+    await uploadFile(key, screenshotBuffer, 'image/jpeg', {
+      'Cache-Control': 'public, max-age=31536000, immutable'
     });
 
-    const key = `browse/${req.userId}/${Date.now()}.jpg`;
-    await s3.send(new PutObjectCommand({
-      Bucket: process.env.R2_BUCKET_NAME,
-      Key: key,
-      Body: screenshotBuffer,
-      ContentType: 'image/jpeg',
-    }));
-
-    const screenshotUrl = `${process.env.PUBLIC_BASE_URL || 'https://askcore.dev'}/api/files/${key}`;
+    const screenshotUrl = getPublicUrl(key);
     const pageTitle = await page.title();
     const currentUrl = page.url();
 

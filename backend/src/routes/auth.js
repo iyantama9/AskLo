@@ -10,7 +10,6 @@ const { recordUsage } = require('../utils/usage');
 const logger = require('../utils/logger');
 const { observe } = require('../utils/metrics');
 const SESSION_TTL_HOURS = Number(process.env.SESSION_TTL_HOURS || 24);
-const MAX_ACCOUNTS_PER_IP_PER_DAY = Number(process.env.MAX_ACCOUNTS_PER_IP_PER_DAY || 3);
 
 const router = express.Router();
 
@@ -116,24 +115,6 @@ router.post('/register', async (req, res) => {
   }
 
   try {
-    if (clientIp) {
-      const ipCount = await pool.query(
-        `SELECT COUNT(*)::int AS count
-         FROM users
-         WHERE created_ip = $1::inet
-           AND created_at > NOW() - INTERVAL '24 hours'`,
-        [clientIp]
-      );
-
-      if ((ipCount.rows[0]?.count || 0) >= MAX_ACCOUNTS_PER_IP_PER_DAY) {
-        return res.status(429).json({
-          error: 'Too many accounts created from this IP today',
-          code: 'ACCOUNT_LIMIT_REACHED',
-          request_id: req.requestId,
-        });
-      }
-    }
-
     const existing = await pool.query('SELECT id FROM users WHERE username = $1', [username]);
     if (existing.rows.length > 0) {
       return res.status(409).json({

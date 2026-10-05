@@ -1,0 +1,40 @@
+# Build output and local tool state
+.dart_tool/
+.packages
+.pub/
+build/
+coverage/
+
+# Non-web platform sources
+android/
+ios/
+linux/
+macos/
+windows/
+
+# Backend has its own build context
+backend/
+
+# Git, IDE, and agent state
+.git/
+.gitignore
+.idea/
+.vscode/
+.code-review-graph/
+.claude/
+.agent/
+*.iml
+
+# Documentation and deploy artifacts
+*.md
+*.tar.gz
+*.zip
+
+# Logs and temporary files
+*.log
+*.tmp
+
+# Secrets
+.env
+.env.*
+!.env.docker.example

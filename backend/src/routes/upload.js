@@ -1,6 +1,6 @@
 const express = require('express');
 const multer = require('multer');
-const { S3Client, PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
+const { uploadFile, getFile } = require('../utils/minio');
 const { v4: uuidv4 } = require('uuid');
 const authMiddleware = require('../middleware/auth');
 const { recordFile, assertCanReadR2Key } = require('../utils/files');
@@ -18,15 +18,6 @@ const upload = multer({
   limits: { fileSize: MAX_SIZE },
 });
 
-const s3 = new S3Client({
-  region: 'auto',
-  endpoint: `https://${process.env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
-  credentials: {
-    accessKeyId: process.env.R2_ACCESS_KEY_ID,
-    secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
-  },
-});
-
 // Upload file
 router.post('/', upload.single('file'), async (req, res) => {
   if (!req.file) {
@@ -40,14 +31,7 @@ router.post('/', upload.single('file'), async (req, res) => {
     await assertQuota(req.userId, 'upload_count', 1);
     await assertQuota(req.userId, 'upload_bytes', req.file.size);
 
-    await s3.send(
-      new PutObjectCommand({
-        Bucket: process.env.R2_BUCKET_NAME,
-        Key: key,
-        Body: req.file.buffer,
-        ContentType: req.file.mimetype,
-      })
-    );
+    await uploadFile(key, req.file.buffer, req.file.mimetype);
 
     const file = await recordFile({
       ownerId: req.userId,
@@ -74,21 +58,17 @@ router.post('/', upload.single('file'), async (req, res) => {
   }
 });
 
-// Download private file (proxy from R2)
+// Download private file (proxy from MinIO)
 router.get('/:key(*)', async (req, res) => {
   try {
     const key = await assertCanReadR2Key(req.userId, req.params.key);
-    const result = await s3.send(
-      new GetObjectCommand({
-        Bucket: process.env.R2_BUCKET_NAME,
-        Key: key,
-      })
-    );
+    const metadata = await getFileMetadata(key);
+    const stream = await getFile(key);
 
-    res.set('Content-Type', result.ContentType || 'application/octet-stream');
+    res.set('Content-Type', metadata.ContentType || 'application/octet-stream');
     res.set('X-Content-Type-Options', 'nosniff');
     res.set('Content-Disposition', `attachment; filename="${key.split('/').pop()}"`);
-    result.Body.pipe(res);
+    stream.pipe(res);
   } catch (err) {
     return sendError(res, req, err.statusCode || 404, 'File not found', err);
   }

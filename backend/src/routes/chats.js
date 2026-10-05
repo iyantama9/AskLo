@@ -2,7 +2,7 @@ const express = require('express');
 const { pool } = require('../db');
 const authMiddleware = require('../middleware/auth');
 const { sendError } = require('../utils/errors');
-const { assertValidModel } = require('../utils/modelCatalog');
+const { assertValidModel, getFallbackModel } = require('../utils/modelCatalog');
 
 const router = express.Router();
 router.use(authMiddleware);
@@ -25,10 +25,16 @@ router.get('/', async (req, res) => {
 // Create new chat
 router.post('/', async (req, res) => {
   const { title, model } = req.body;
-  const selectedModel = model || 'mk/sonnet-4.5';
 
   try {
-    assertValidModel(selectedModel);
+    const selectedModel = model || await getFallbackModel('chat');
+    if (!selectedModel) {
+      const error = new Error('No enabled chat model is available');
+      error.statusCode = 503;
+      error.code = 'NO_CHAT_MODEL';
+      throw error;
+    }
+    await assertValidModel(selectedModel);
     const result = await pool.query(
       `INSERT INTO chats (user_id, title, model)
        VALUES ($1, $2, $3) RETURNING *`,
@@ -44,7 +50,7 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   const { title, model } = req.body;
   try {
-    if (model) assertValidModel(model);
+    if (model) await assertValidModel(model);
     const result = await pool.query(
       `UPDATE chats SET
         title = COALESCE($1, title),
